@@ -249,7 +249,9 @@ We would like to know if any of the COVID SNPs are credibly causal for the eQTL.
 
 We will only do this for genes where at least one COVID SNP has a QTL p value smaller than 1e-3. For this, let's merge the eQTL catalogue and GTEx results in each plot.
 
-The direction of the arrow indicates whether the SNP is associated with increased (upwards arrow) or decreased (downwards arrow) risk of COVID. Note that this does indicate the direction of change in expression, but it meant to determine whether the SNP with top p value (or the top COVID SNP) has the same direction of effect. We are hoping to find cases where the p value of the top COVID SNP (blue) is similar to the p value of the top SNP overall (red), and in the same direction. In general it makes sense to ignore most QTL datasets where the top SNP has a p value worse than about 1e-3 or 1e-4, since these are just noise. I would only pay attention to datasets where there is a clear QTL effect.
+The direction of the arrow indicates whether the SNP is associated with increased (upwards arrow) or decreased (downwards arrow) *gene expression*. Note that this for COVID SNPs, this also indicates the direction of effect on COVID risk, since the ALT allele is the effect allele. For non-COVID SNPs, we can't know for sure the direction of effect on COVID risk. (Where the p values are close for the top SNP and top COVID SNP, it's more likely that these are in LD, and so the arrow then reflects the direction of COVID risk. But we would have to check the LD, or check in the GWAS summary statistics to be sure.)
+
+We are hoping to find cases where the p value of the top COVID SNP (blue) is similar to the p value of the top SNP overall (red), and in the same direction. In general it makes sense to ignore most QTL datasets where the top SNP has a p value worse than about 1e-3 or 1e-4, since these are just noise. I would only pay attention to datasets where there is a clear QTL effect.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.height=9, fig.width=8}
 # Do the same, but now getting minp for QTL study / gene combinations
