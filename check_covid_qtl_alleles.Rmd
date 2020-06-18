@@ -1,0 +1,327 @@
+---
+title: "Check covid-19 GWAS SNPs for QTL effects"
+output: html_document
+---
+
+## Introduction
+
+The first covid-19 GWAS to find a genome-wide significant effect defined a credible set with 22 SNPs at chromosome 3p21.31 (lead SNP rs11385942). First off, here are the COVID-associated SNPs we're using.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(coloc)
+library(GenomicRanges)
+library(Rsamtools)
+library(annotables)
+
+verbose = T
+dir = "/Users/jeremys/work/opentargets/covid"
+tabix_paths = read.delim("https://raw.githubusercontent.com/eQTL-Catalogue/eQTL-Catalogue-resources/master/tabix/tabix_ftp_paths.tsv", sep = "\t", header = TRUE, stringsAsFactors = FALSE) %>% dplyr::as_tibble()
+imported_tabix_paths = read.delim("https://raw.githubusercontent.com/eQTL-Catalogue/eQTL-Catalogue-resources/master/tabix/tabix_ftp_paths_imported.tsv", sep = "\t", header = TRUE, stringsAsFactors = FALSE) %>% dplyr::as_tibble()
+theme_set(theme_bw(10))
+
+grch38_nodup = grch38 %>%
+  filter(!duplicated(ensgene))
+
+# Define the COVID SNPs as chr_pos_ref_alt to match eQTL catalogue
+covid_snps = c(
+"3_45805277_A_G",
+"3_45801750_G_A",
+"3_45807268_G_C",
+"3_45801823_C_T",
+"3_45801947_G_T",
+"3_45859142_G_C",
+"3_45867532_A_G",
+"3_45866624_A_T",
+"3_45818159_G_A",
+"3_45858159_A_G",
+"3_45825948_A_G",
+"3_45847198_A_G",
+"3_45820440_G_A",
+"3_45821460_T_C",
+"3_45859597_C_T",
+"3_45823240_T_C",
+"3_45830416_G_A",
+"3_45867022_C_G",
+"3_45848429_A_T",
+"3_45838989_T_C",
+"3_45848457_C_T",
+"3_45834967_G_GA")
+covid_snps_chr = paste0("chr", covid_snps)
+
+print(covid_snps)
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+#' A general function to quickly import tabix indexed tab-separated files into data_frame
+#'
+#' @param tabix_file Path to tabix-indexed text file
+#' @param param An instance of GRanges, RangedData, or RangesList
+#' provide the sequence names and regions to be parsed. Passed onto Rsamtools::scanTabix()
+#' @param ... Additional parameters to be passed on to readr::read_delim()
+#'
+#' @return List of data_frames, one for each entry in the param GRanges object.
+#' @export
+scanTabixDataFrame <- function(tabix_file, param, ...){
+  tabix_list = Rsamtools::scanTabix(tabix_file, param = param)
+  df_list = lapply(tabix_list, function(x,...){
+    if(length(x) > 0){
+      if(length(x) == 1){
+        #Hack to make sure that it also works for data frames with only one row
+        #Adds an empty row and then removes it
+        result = paste(paste(x, collapse = "\n"),"\n",sep = "")
+        result = readr::read_delim(result, delim = "\t", ...)[1,]
+      }else{
+        result = paste(x, collapse = "\n")
+        result = readr::read_delim(result, delim = "\t", ...)
+      }
+    } else{
+      #Return NULL if the nothing is returned from tabix file
+      result = NULL
+    }
+    return(result)
+  }, ...)
+  return(df_list)
+}
+
+# In eQTL Catalogue, variants with multiple rsids are split over multiple rows in the summary statistics files.
+# Thus, we first want to retain only one unique record per variant. To simplify colocalisation analysis, we
+# also want to exclude multi-allelic variants. The following function imports summary statistics from a
+# tabix-index TSV file and performs necessary filtering.
+import_eQTLCatalogue <- function(ftp_path, region, column_names, verbose = TRUE) {
+  if(verbose){
+      print(ftp_path)
+  }
+  
+  #Fetch summary statistics with Rsamtools
+  summary_stats = scanTabixDataFrame(ftp_path, region, col_names = column_names)[[1]]
+  
+  #Remove rsid duplicates and multi-allelic variant
+  summary_stats = dplyr::select(summary_stats, -rsid) %>% 
+    dplyr::distinct() %>% #rsid duplicates
+    dplyr::mutate(id = paste(chromosome, position, sep = ":")) %>% 
+    dplyr::group_by(id, gene_id) %>% 
+    dplyr::mutate(row_count = n()) %>% dplyr::ungroup() %>% 
+    dplyr::filter(row_count == 1) #Multiallelics
+  
+  return(summary_stats)
+}
+
+import_multiTissue_eQTL = function(paths.df, region, column_names, verbose = TRUE) {
+  sumstat_list = lapply(1:nrow(paths.df), FUN = function(i) {
+    tryCatch( {
+      df = import_eQTLCatalogue(paths.df$ftp_path[i], region, column_names, verbose)
+      bind_cols(paths.df[rep(i, nrow(df)),] %>% select(-tissue_ontology_id, -ftp_path, -qtl_group), df)
+    }, error = function(err) { NULL })
+  } )
+  return( bind_rows(sumstat_list) )
+}
+```
+
+For comparing with eQTLs in the region, we will look at all SNPs within 200 kb of these SNPs, to determine whether any of these are credibly causal SNPs for the eQTL effect.
+
+Let's first look at the minimum p value for Covid credible set SNPs for any gene (within 100 kb) for each QTL dataset. We'll do this first for eQTL catalogue datasets.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.height=6, fig.width=8}
+# Get sumstats from eQTL catalogue and filter for our SNPs of interest
+qtl_catalogue_column_names = colnames(readr::read_tsv(tabix_paths$ftp_path[1], n_max = 1))
+
+# Range from first to last credset SNP, plus window of 100 kb
+region_granges = GenomicRanges::GRanges(
+  seqnames = "3", 
+  ranges = IRanges::IRanges(start = 45601750, end = 46067532), 
+  strand = "*")
+
+nearby_genes = grch38_nodup %>%
+  filter(chr == "3") %>%
+  rowwise() %>%
+  mutate(geneDist = min(abs(45801750 - start), abs(45801750 - end), abs(45867532 - start), abs(45867532 - end))) %>%
+  filter(geneDist < 100000)
+
+# First try a subset of studies
+#sel_studies = seq(1, nrow(tabix_paths), 20)
+sel_studies = seq(1, nrow(tabix_paths), 1)
+
+if (!file.exists("qtl.catalogue.covid.chr3.tsv.gz")) {
+  qtl.catalogue.df = import_multiTissue_eQTL(tabix_paths[sel_studies,] %>% filter(quant_method == "ge"), region_granges, qtl_catalogue_column_names, verbose=verbose) %>%
+    filter(gene_id %in% nearby_genes$ensgene) %>%
+    mutate(qtl_dataset = paste(study, tissue_label, condition_label, quant_method))
+  write_tsv(qtl.catalogue.df, path = "qtl.catalogue.covid.chr3.tsv.gz")
+} else {
+  qtl.catalogue.df = read_tsv("qtl.catalogue.covid.chr3.tsv.gz")
+}
+
+qtl.catalogue.covid.df = qtl.catalogue.df %>% filter(variant %in% covid_snps_chr)
+
+qtl.catalogue.covid.study.minp.df = qtl.catalogue.covid.df %>%
+  group_by(qtl_dataset) %>%
+  summarise(minp = min(pvalue))
+
+ggplot(qtl.catalogue.covid.study.minp.df, aes(y=fct_reorder(qtl_dataset, -log10(minp)), x=-log10(minp))) +
+  geom_point() +
+  ylab("QTL dataset") +
+  ggtitle("eQTL catalogue: MinP per QTL study for Covid credset SNPs")
+```
+
+Next do the same thing for GTEx.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.height=6, fig.width=8}
+gtex_column_names = colnames(readr::read_tsv(imported_tabix_paths$ftp_path[1], n_max = 1))
+
+if (!file.exists("qtl.gtex.covid.chr3.tsv.gz")) {
+  qtl.gtex.df = import_multiTissue_eQTL(imported_tabix_paths %>% filter(quant_method == "ge"), region_granges, gtex_column_names, verbose=verbose) %>%
+    filter(gene_id %in% nearby_genes$ensgene) %>%
+    mutate(qtl_dataset = tissue_label)
+  write_tsv(qtl.gtex.df, path = "qtl.gtex.covid.chr3.tsv.gz")
+} else {
+  qtl.gtex.df = read_tsv("qtl.gtex.covid.chr3.tsv.gz")
+}
+
+qtl.gtex.covid.df = qtl.gtex.df %>% filter(variant %in% covid_snps_chr)
+
+qtl.gtex.covid.study.minp.df = qtl.gtex.covid.df %>%
+  group_by(qtl_dataset) %>%
+  summarise(minp = min(pvalue))
+
+ggplot(qtl.gtex.covid.study.minp.df, aes(y=fct_reorder(qtl_dataset, -log10(minp)), x=-log10(minp))) +
+  geom_point() +
+  ylab("QTL dataset") +
+  ggtitle("GTEx: MinP per QTL study for Covid credset SNPs")
+```
+
+We can also look at the minimum p value across QTL datasets for each gene, for both COVID SNPs and other SNPs. First for eQTL catalogue.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.height=3, fig.width=7}
+qtl.catalogue.gene.minp.df = qtl.catalogue.df %>%
+  group_by(gene_id) %>%
+  summarise(minp = min(pvalue)) %>%
+  left_join(grch38_nodup, by=c("gene_id" = "ensgene")) %>%
+  filter(!is.na(symbol)) %>%
+  mutate(type = "All SNPs")
+qtl.catalogue.covid.gene.minp.df = qtl.catalogue.covid.df %>%
+  group_by(gene_id) %>%
+  summarise(minp = min(pvalue)) %>%
+  left_join(grch38_nodup, by=c("gene_id" = "ensgene")) %>%
+  filter(!is.na(symbol)) %>%
+  mutate(type = "Covid SNPs")
+
+gene.summary.df = bind_rows(qtl.catalogue.gene.minp.df, qtl.catalogue.covid.gene.minp.df)
+ggplot(gene.summary.df, aes(y=fct_reorder(symbol, -log10(minp)), x=-log10(minp), col=type)) +
+  geom_point(alpha=0.7) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Gene ID") +
+  ggtitle("eQTL catalogue: MinP per gene (across QTL datasets)")
+```
+And also for GTEx.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.height=4, fig.width=7}
+grch38_nodup = grch38 %>%
+  filter(!duplicated(ensgene))
+qtl.gtex.gene.minp.df = qtl.gtex.df %>%
+  group_by(gene_id) %>%
+  summarise(minp = min(pvalue)) %>%
+  left_join(grch38_nodup, by=c("gene_id" = "ensgene")) %>%
+  filter(!is.na(symbol)) %>%
+  mutate(type = "All SNPs")
+qtl.gtex.covid.gene.minp.df = qtl.gtex.covid.df %>%
+  group_by(gene_id) %>%
+  summarise(minp = min(pvalue)) %>%
+  left_join(grch38_nodup, by=c("gene_id" = "ensgene")) %>%
+  filter(!is.na(symbol)) %>%
+  mutate(type = "Covid SNPs")
+
+gene.summary.df = bind_rows(qtl.gtex.gene.minp.df, qtl.gtex.covid.gene.minp.df)
+ggplot(gene.summary.df, aes(y=fct_reorder(symbol, -log10(minp)), x=-log10(minp), col=type)) +
+  geom_point(alpha=0.7) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Gene ID") +
+  ggtitle("GTEx: MinP per gene (across QTL datasets)")
+```
+
+SLC6A20 is the only gene for which a COVID SNP is also the top QTL SNP across datasets.
+Other genes where the top COVID SNP is near the top SNP overall include LZTFL1 and CCR9.
+
+
+### Per Gene - genes of interest
+
+We would like to know if any of the COVID SNPs are credibly causal for the eQTL. This is not a proper colocalisation analysis, but we can get some of the way there by checking whether any COVID SNP has a QTL p value within a couple orders of magnitude of the minimum QTL p value for the same gene.
+
+We will only do this for genes where at least one COVID SNP has a QTL p value smaller than 1e-3. For this, let's merge the eQTL catalogue and GTEx results in each plot.
+
+The direction of the arrow indicates whether the SNP is associated with increased (upwards arrow) or decreased (downwards arrow) risk of COVID. Note that this does indicate the direction of change in expression, but it meant to determine whether the SNP with top p value (or the top COVID SNP) has the same direction of effect. We are hoping to find cases where the p value of the top COVID SNP (blue) is similar to the p value of the top SNP overall (red), and in the same direction. In general it makes sense to ignore most QTL datasets where the top SNP has a p value worse than about 1e-3 or 1e-4, since these are just noise. I would only pay attention to datasets where there is a clear QTL effect.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.height=9, fig.width=8}
+# Do the same, but now getting minp for QTL study / gene combinations
+qtl.gene.minp.df = bind_rows(qtl.catalogue.df, qtl.gtex.df) %>%
+  group_by(qtl_dataset, gene_id) %>%
+  filter(pvalue == min(pvalue)) %>%
+  mutate(type = "All SNPs",
+         qtl_risk = if_else(beta > 0, "positive", "negative")) %>%
+  left_join(grch38_nodup, by=c("gene_id" = "ensgene")) %>%
+  filter(!is.na(symbol))
+qtl.covid.gene.minp.df = bind_rows(qtl.catalogue.covid.df, qtl.gtex.covid.df) %>%
+  group_by(qtl_dataset, gene_id) %>%
+  filter(pvalue == min(pvalue)) %>%
+  mutate(type = "Covid SNPs",
+         qtl_risk = if_else(beta > 0, "positive", "negative")) %>%
+  left_join(grch38_nodup, by=c("gene_id" = "ensgene")) %>%
+  filter(!is.na(symbol))
+
+qtl.combined.df = bind_rows(qtl.gene.minp.df, qtl.covid.gene.minp.df)
+
+#View(qtl.gtex.df %>% filter(grepl("Muscle", tissue_label), gene_id == "ENSG00000163817"))
+ 
+symbols = unique(qtl.covid.gene.minp.df %>% filter(pvalue < 1e-3) %>% arrange(pvalue) %>% .$symbol)
+#pdf("covid_gwas_qtls.filtered.pdf", width=7, height=4)
+for (geneSymbol in symbols) {
+  df = qtl.combined.df %>%
+    filter(symbol == geneSymbol) %>%
+    group_by(qtl_dataset) %>%
+    mutate(covid_snp_p = min(pvalue[type == "Covid SNPs"]))
+  p1 = ggplot(df, aes(y=fct_reorder(qtl_dataset, -log10(covid_snp_p)), x=-log10(pvalue), col=type, fill=type, shape=qtl_risk)) +
+    geom_point(alpha = 0.8, size=2) +
+    scale_shape_manual(values = c("positive" = 24, "negative" = 25)) +
+    ylab("QTL dataset") +
+    ggtitle(sprintf("%s: MinP per QTL dataset", geneSymbol))
+  print(p1)
+}
+#dev.off()
+```
+
+## Interpretation
+
+Genes of interest based on this:
+
+* CXCR6 has a COVID SNP as the top for the Schmiedel Tfh cell naive dataset. The SNP is also highly ranked and directionally concordance in Artery-Tibial and Adipose. Muscle has a strong eQTL in the opposite direction as the COVID SNP.
+* SLC6A20 has a COVID SNP near the top in a few GTEx datasets (muscle, esophagus, breast, tibial nerve).
+* A transcript AC098476.1 (TEC - to be experimentally confirmed) has COVID SNPs among the top in the tibial nerve, muscle, breast. This transcript is between SLC6A20 and SACM1L.
+
+Other genes, such as FYCO1, LZTFL1, and CCR9, in general don't show COVID SNPs as candidates for being causal.
+
+Overall I don't feel this is great support for any gene, since we don't have a case where many (independent) datasets point to the same gene with a COVID SNP near the top in most cases.
+
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.height=6, fig.width=8, eval=FALSE}
+#Next, include all genes.
+
+#pdf("covid_gwas_qtls.pdf", width=7, height=4)
+symbols = unique(qtl.combined.df$symbol)
+for (geneSymbol in symbols) {
+  df = qtl.combined.df %>%
+    filter(symbol == geneSymbol) %>%
+    group_by(qtl_dataset) %>%
+    mutate(covid_snp_p = min(pvalue[type == "Covid SNPs"]))
+  p1 = ggplot(df, aes(x=fct_reorder(qtl_dataset, log10(pvalue)), y=-log10(pvalue), col=type, fill=type, shape=qtl_risk)) +
+    geom_point(alpha = 0.8, size=2) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    scale_shape_manual(values = c("positive" = 24, "negative" = 25)) +
+    xlab("QTL dataset") +
+    ggtitle(sprintf("%s: MinP per QTL dataset", geneSymbol))
+  print(p1)
+}
+#dev.off()
+
+```
+
