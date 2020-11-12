@@ -5,7 +5,9 @@ output: html_document
 
 ## Introduction
 
-The first covid-19 GWAS to find a genome-wide significant effect defined a credible set with 22 SNPs at chromosome 3p21.31 (lead SNP rs11385942). First off, here are the COVID-associated SNPs we're using.
+The first covid-19 GWAS to find a genome-wide significant effect, <a href="https://www.nejm.org/doi/full/10.1056/NEJMoa2020283">Ellinghaus et al.</a>, defined a credible set with 22 SNPs at chromosome 3p21.31 (lead SNP rs11385942). Here we analyse the overlap between COVID-19 SNPs and various eQTL datasets.
+
+First off, here are the COVID-associated SNPs we're using.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 library(tidyverse)
