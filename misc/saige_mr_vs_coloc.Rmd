@@ -1,0 +1,112 @@
+---
+title: "Exploring quality of pQTL-MR associations"
+output: html_document
+---
+
+## Introduction
+
+Mohd has run MR between the Sun et al. pQTL dataset and SAIGE binary trait GWAS of UK Biobank.
+
+An important question is: how informative is it to have an MR association at a given p-value level? Because we are doing many MR tests, some associations below a given p-value threshold will be false positives (FPs). We would like to use additional evidence to understand what the FP rate is at different MR p-value thresholds.
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+options(stringsAsFactors = F)
+theme_set(theme_bw())
+```
+
+Let's first look at the distributions of p values across all tests (of QTL-trait MR), for:
+
+- QTL associations
+- trait associations
+- MR (QTL-trait) associations
+
+Note that these will be the p value distributions across all TESTS, not necessarily across all QTLs or trait loci, since QTLs / loci may be tested multiple times.
+
+```{r, warning=FALSE, message=FALSE}
+saige_mr = read_tsv("/Users/jeremys/work/otgenetics/misc/mohd/gsmr_cis_sun_SAIGE_Sep2020_coloc_ncases.tsv.gz") %>%
+  rename(mr_p = bxy_pval, mr_beta = bxy, mr_se = bxy_se,
+         qtl_p = bzx_pval, qtl_beta = bzx, qtl_se = bzx_se,
+         trait_p = bzy_pval, trait_beta = bzy, trait_se = bzy_se)
+
+saige_mr = saige_mr %>%
+  group_by(prot, out) %>%
+  summarise(nsnp = first(nsnp),
+            snp = first(snp),
+            trait_beta = first(trait_beta),
+            trait_se = first(trait_se),
+            trait_p = min(trait_p),
+            qtl_beta = first(qtl_beta),
+            qtl_se = first(qtl_se),
+            qtl_p = min(qtl_p),
+            mr_beta = first(mr_beta),
+            mr_se = first(mr_se),
+            mr_p = min(mr_p),
+            candidate_coloc_snp = first(candidate_coloc_snp),
+            n_cases = first(n_cases),
+            coloc_prob = first(posterior_prob) )
+```
+
+Because we have selected only significant QTLs to test, the average QTL is quite strong (median p about 1e-11).
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(saige_mr, aes(x=-log10(qtl_p))) + geom_histogram(bins = 100) + ggtitle("QTL P values")
+```
+
+The opposite is true for the trait loci. The majority have minimum p > 0.01 (trait p values across the selected QTL SNP instruments).
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(saige_mr, aes(x=-log10(trait_p))) + geom_histogram(bins = 100) + ggtitle("Trait P values")
+ggplot(saige_mr %>% filter(-log10(trait_p) < 5), aes(x=-log10(trait_p))) +
+  geom_histogram(bins = 100) + ggtitle("Trait P values - zoomed in")
+```
+
+The large majority of the MR p values are also > 0.01. This isn't surprising, since we are underpowered for most of the MR tests, due to the traits not having a genetic association at the locus. Note that the table I have is already thresholded for MR p < 0.05.
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(saige_mr, aes(x=-log10(mr_p))) + geom_histogram(bins = 100) + ggtitle("MR P values")
+ggplot(saige_mr %>% filter(-log10(mr_p) < 5), aes(x=-log10(mr_p))) +
+  geom_histogram(bins = 100) + ggtitle("MR P values - zoomed in")
+```
+
+Let's see what fraction of the time we have a colocalising signal, in addition to MR p < 0.05, in different bins of trait minimum p value.
+
+```{r, warning=FALSE, message=FALSE}
+# A function to split a continuous annotation into categories
+categorize = function(vals, thresholds) {
+  threshold = sort(thresholds)
+  if (length(thresholds) < 1) {
+    return(NULL)
+  }
+  catLevels = c(paste0("<= ", threshold[1]))
+  cats = rep(catLevels[1], length(vals))
+  for (i in 1:length(thresholds)) {
+    if (i == length(thresholds)) {
+      catLevels[i+1] = paste0("> ", threshold[i])
+      cats[vals > threshold[i]] = catLevels[i+1]
+    } else {
+      catLevels[i+1] = paste0(threshold[i], "-", threshold[i+1])
+      cats[vals > threshold[i]] = catLevels[i+1]
+    }
+  }
+  cats = factor(cats, levels = catLevels)
+  return(cats)
+}
+
+saige_mr$trait_p_bin = categorize(saige_mr$trait_p, c(0.05, 0.01, 0.001, 1e-4, 1e-5))
+
+ggplot(saige_mr, aes(x=trait_p_bin, y=coloc_prob, fill=trait_p_bin)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.1) +
+  xlab("Trait minimum P (for SNP instruments)") + ylab("Coloc probability")
+```
+
+### Interpretation
+
+We rarely get a colocalisation signal (with coloc prob > 0.8) when minimum p value for the trait is > 1e-4, and never do if it's > 1e-3. This doesn't mean that there definitely isn't a shared genetic association, just that we're not powered to detect one.
+
+One thing we could do is to plot the H4/H3 ratio from tests done using the standard coloc package. I still don't think this tells us what we want to know, however.
+
+We want to know the probability that an MR association is real, given the MR p value, and possibly also the QTL SNP and trait P values. I think that the only way to do that would be to compare MR tests done on simulated data (from UK Biobank), generated under the null or alternative hypotheses.
+
+
