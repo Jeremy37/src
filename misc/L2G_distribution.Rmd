@@ -1,0 +1,194 @@
+---
+title: "Number of L2G-prioritized genes"
+output: html_document
+---
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(annotables)
+options(stringsAsFactors = F)
+theme_set(theme_bw())
+
+library(tidyverse)
+theme_set(theme_bw())
+
+otgdir = "/Users/jeremys/work/otgenetics"
+df = read_tsv("/Users/jeremys/work/otgenetics/otg/l2g.full.tsv.gz", col_types = cols_only(study_id = "c", gene_id = "c", y_proba = "d")) %>%
+  rename(l2g = y_proba)
+studies = read_tsv("/Users/jeremys/work/otgenetics/otg/studies.tsv.gz")
+
+df = df %>%
+  left_join(studies %>% select(study_id, trait_reported, trait_category, has_sumstats)) %>%
+  left_join(grch38 %>% select(gene_id = ensgene, symbol) %>% filter(!duplicated(gene_id)))
+
+trait_category_counts = studies %>%
+  group_by(trait_category) %>%
+  summarise(n = n())
+```
+
+Total number of unique genes with high L2G score in any study.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+num = df %>% filter(l2g > 0.5) %>% .$gene_id %>% unique() %>% length()
+print(sprintf("L2G > 0.5: %d", num))
+
+num = df %>% filter(has_sumstats, l2g > 0.5) %>% .$gene_id %>% unique() %>% length()
+print(sprintf("L2G > 0.5 (has sumstats): %d", num))
+
+num = df %>% filter(l2g > 0.8) %>% .$gene_id %>% unique() %>% length()
+print(sprintf("L2G > 0.8: %d", num))
+
+num = df %>% filter(has_sumstats, l2g > 0.8) %>% .$gene_id %>% unique() %>% length()
+print(sprintf("L2G > 0.8 (has sumstats): %d", num))
+
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+# Save a list of all genes with the max L2G score per gene
+max_l2g = df %>%
+  arrange(desc(l2g)) %>%
+  filter(!duplicated(gene_id)) %>%
+  select(study_id, gene_id, symbol, l2g, trait_reported, trait_category)
+write_tsv(max_l2g, path = file.path(otgdir, "misc/l2g_summary/max_l2g_per_gene.tsv"), na = "")
+```
+
+## Number of studies in which a given gene has high L2G score
+Notice log-scaled axis.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+df %>%
+  filter(l2g > 0.5) %>%
+  group_by(gene_id) %>%
+  filter(!duplicated(study_id)) %>%
+  summarise(num_studies = n()) %>%
+  ggplot(aes(x=num_studies)) +
+  geom_histogram(bins=50) +
+  scale_y_log10() +
+  ggtitle("L2G > 0.5") +
+  xlab("Number of genes prioritised in study") + ylab("Number of studies")
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+df %>%
+  filter(l2g > 0.8) %>%
+  group_by(gene_id) %>%
+  filter(!duplicated(study_id)) %>%
+  summarise(num_studies = n()) %>%
+  ggplot(aes(x=num_studies)) +
+  geom_histogram(bins=50) +
+  scale_y_log10() +
+  ggtitle("L2G > 0.8") +
+  xlab("Number of genes prioritised in study") + ylab("Number of studies")
+```
+
+## Genes with L2G > 0.5 in the most studies
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+df %>%
+  filter(l2g > 0.5) %>%
+  group_by(gene_id) %>%
+  filter(!duplicated(study_id)) %>%
+  summarise(num_studies = n(),
+            symbol = first(symbol)) %>%
+  arrange(desc(num_studies)) %>%
+  select(symbol, num_studies)
+```
+
+AC002094.3 overlaps gene VTN, and seems to be a trans-pQTL for a large number of proteins in the Emilsson study.
+
+Without the Emilsson study:
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+study_counts = df %>%
+  filter(l2g > 0.5) %>%
+  filter(!grepl("GCST006585_", study_id)) %>%
+  group_by(gene_id) %>%
+  filter(!duplicated(study_id)) %>%
+  summarise(symbol = first(symbol),
+            num_studies = n())
+
+study_counts %>%
+  arrange(desc(num_studies)) %>%
+  write_tsv(path = file.path(otgdir, "misc/l2g_summary/num_studies_per_gene_l2g_gt_0.5.tsv"), na = "")
+
+study_counts %>%
+  arrange(desc(num_studies)) %>%
+  select(symbol, num_studies)
+```
+
+## Studies prioritising the most genes
+(excluding Emilsson)
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+gt_0.5 = df %>%
+  filter(l2g > 0.5) %>%
+  filter(!grepl("GCST006585_", study_id)) %>%
+  filter(!duplicated(gene_id)) %>%
+  group_by(study_id) %>%
+  summarise(num_genes = n()) %>%
+  arrange(desc(num_genes))
+
+gt_0.8 = df %>%
+  filter(l2g > 0.8) %>%
+  filter(!grepl("GCST006585_", study_id)) %>%
+  filter(!duplicated(gene_id)) %>%
+  group_by(study_id) %>%
+  summarise(num_genes = n()) %>%
+  arrange(desc(num_genes))
+
+gene_counts = studies %>%
+  left_join(gt_0.5 %>% rename('L2G>0.5' = num_genes), by="study_id") %>%
+  left_join(gt_0.8 %>% rename('L2G>0.8' = num_genes), by="study_id")
+gene_counts$`L2G>0.5`[is.na(gene_counts$`L2G>0.5`)] = 0
+gene_counts$`L2G>0.8`[is.na(gene_counts$`L2G>0.8`)] = 0
+
+gene_counts %>%
+  arrange(desc(`L2G>0.5`)) %>%
+  select(study_id, trait_reported, `L2G>0.5`, `L2G>0.8`, pub_title) %>%
+  head(10)
+```
+
+Studies prioritising the most genes, also excluding anthropometric measurements:
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+gene_counts %>%
+  arrange(desc(`L2G>0.5`)) %>%
+  filter(!grepl("Anthropometric", trait_category, ignore.case = T)) %>%
+  filter(!grepl("Measurement", trait_category, ignore.case = T)) %>%
+  filter(!grepl("UKB", pub_author, ignore.case = T)) %>%
+  select(study_id, trait_reported, `L2G>0.5`, `L2G>0.8`, pub_title) %>%
+  head(10)
+
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+
+# Number of unique genes with L2G score per study
+# df %>%
+#   group_by(study_id) %>%
+#   filter(!duplicated(gene_id)) %>%
+#   summarise(num_genes = n()) %>%
+#   ggplot(aes(x=num_genes)) +
+#   geom_histogram() +
+#   scale_y_log10()
+
+# Number of unique genes with L2G > 0.5 per study
+num_unique_genes = df %>%
+  group_by(study_id) %>%
+  filter(l2g > 0.5, !duplicated(gene_id)) %>%
+  summarise(num_genes_prioritised = n())
+
+num_unique_genes %>%
+  ggplot(aes(x=num_genes_prioritised)) +
+  geom_histogram() +
+  scale_y_log10() + scale_x_log10() +
+  ggtitle("Number of studies prioritising (L2G > 0.5) a given number of genes") +
+  ylab("Number of studies") + xlab("Number of genes prioritised")
+
+gene_counts %>%
+  arrange(desc(`L2G>0.5`)) %>%
+  write_tsv(path = file.path(otgdir, "misc/l2g_summary/num_genes_per_study_l2g_gt_0.5.tsv"), na = "")
+```
+
