@@ -14,7 +14,8 @@ import re
 import gzip
 
 #args.file = "gs://genetics-portal-staging/v2d/200207/toploci.parquet"
-
+# Example:
+# gcs_parquet_to_text.py -f gs://genetics-portal-staging/v2d/200207/toploci.parquet
 def main():
     args = parse_args()
     if args.mirror_path and args.out_file is not None:
@@ -69,7 +70,7 @@ def main():
             if args.pretty:
                 print(df.to_string(index=None, na_rep='NA') + shape_msg)
             else:
-                df.to_csv(sys.stdout, sep='\t', index=None, na_rep='NA', compression='gzip')
+                df.to_csv(sys.stdout, sep='\t', index=None, na_rep='NA')
                 print(shape_msg)
     finally:
         if downloaded_file is not None and not args.keep:
