@@ -242,9 +242,6 @@ git branch -d hotfix # Delete branch no longer needed (i.e. after it's merged in
 
 git log --oneline --decorate # see commits and branches
 
-# github.com/jeremy37 token:
-# 9679f5feaff127df93c55ac0b40638d4db915218
-
 
 
 ##########################################################################################
