@@ -4,11 +4,10 @@ output: html_document
 ---
 
 ## Introduction
-To explore the value of network propagation from GWAS of specific traits, we have defined 3 sets of seed genes for inflammatory bowel disease (IBD).
+To explore the value of network propagation from GWAS of specific traits, we have defined 2 sets of seed genes for inflammatory bowel disease (IBD).
 
-1. Curated: 33 selected high-confidence causal genes, from expert curation
-2. Strict: 33 curated genes + 18 further genes with L2G score > 0.8
-3. Lenient: 33 curated genes + 87 further genes with L2G score > 0.5
+1. Curated: 37 selected high-confidence causal genes, from expert curation
+2. L2G: 110 curated genes with L2G score > 0.5
 
 We have run network propagation with these seed genes, and for each set we compare against 1,000 runs of network propagation with the same number of randomly selected genes as seed genes. From these runs we can define the Pagerank percentile of each gene relative to randomised inputs.
 
@@ -23,33 +22,26 @@ knitr::opts_chunk$set(fig.width=8, fig.height=5)
 theme_set(theme_bw())
 saveFiles = T
 
-analysis_dir = "/Users/jeremys/work/opentargets/gene_network/ibd"
+root_dir = "/Users/jeremys/work/opentargets/gene_network/ibd"
+analysis_dir = "/Users/jeremys/work/opentargets/gene_network/ibd/2021_05_06"
 
 l2g.loci.df = read_tsv(file.path(analysis_dir, "l2g.IBD_loci.merged.annotated.tsv"))
 l2g.genes.df = read_tsv(file.path(analysis_dir, "l2g.IBD_genes.merged.tsv"))
 
-network1.df = read_csv(file.path(analysis_dir, "IBD_130720/Zscotest_curated.csv.gz")) %>%
+network1.df = read_csv(file.path(analysis_dir, "input/zsco_set1.csv.gz")) %>%
   mutate(pagerank_pctile = rankingIte1000.node / 10,
          seed_gene = padj > 0) %>%
   rename(gene_id = ENSG, geneSymbol = gene)
 
-network2.df = read_csv(file.path(analysis_dir, "IBD_130720/Zscotest_L2G08.csv.gz")) %>%
-  mutate(pagerank_pctile = rankingIte1000.node / 10,
-         seed_gene = padj > 0) %>%
-  rename(gene_id = ENSG, geneSymbol = gene)
-
-network3.df = read_csv(file.path(analysis_dir, "IBD_130720/Zscotest_L2G05.csv.gz")) %>%
+network2.df = read_csv(file.path(analysis_dir, "input/zsco_set2.csv.gz")) %>%
   mutate(pagerank_pctile = rankingIte1000.node / 10,
          seed_gene = padj > 0) %>%
   rename(gene_id = ENSG, geneSymbol = gene)
 
 seed_genes_curated = network1.df %>% filter(seed_gene) %>% .$geneSymbol %>% unique()
 
-seed_genes_strict  = network2.df %>% filter(seed_gene) %>% .$geneSymbol %>% unique()
-seed_genes_strict = seed_genes_strict[!seed_genes_strict %in% seed_genes_curated]
-
-seed_genes_lenient = network3.df %>% filter(seed_gene) %>% .$geneSymbol %>% unique()
-seed_genes_lenient = seed_genes_lenient[!(seed_genes_lenient %in% seed_genes_curated | seed_genes_lenient %in% seed_genes_strict)]
+seed_genes_l2g  = network2.df %>% filter(seed_gene) %>% .$geneSymbol %>% unique()
+seed_genes_l2g = seed_genes_l2g[!seed_genes_l2g %in% seed_genes_curated]
 ```
 
 The number of unique genes in the network should be the same for each of the seed gene selection sets:
@@ -85,25 +77,9 @@ network2.summary.df = network2.df %>%
             pagerank_pctile = median(pagerank_pctile),
             seed_gene = (numRuns == 1))
 
-network3.summary.df = network3.df %>%
-  filter(!seed_gene) %>%
-  group_by(gene_id) %>%
-  summarise(numRuns = n(),
-            Trait = if_else(numRuns == 1, first(Trait), ""),
-            geneSymbol = dplyr::first(geneSymbol),
-            pagerank.mean = mean(page.rank),
-            pagerank = median(page.rank),
-            degree = dplyr::first(degree),
-            Zsco.pagerank.node.mean = mean(Zsco.page.rank.node),
-            Zsco.pagerank.node = median(Zsco.page.rank.node),
-            pagerank_pctile.mean = mean(pagerank_pctile),
-            pagerank_pctile = median(pagerank_pctile),
-            seed_gene = (numRuns == 1))
-
 if (saveFiles) {
   write_tsv(network1.summary.df %>% arrange(desc(pagerank_pctile)), file.path(analysis_dir, "network.curated.summary.tsv"), na = "")
-  write_tsv(network2.summary.df %>% arrange(desc(pagerank_pctile)), file.path(analysis_dir, "network.strict.summary.tsv"), na = "")
-  write_tsv(network3.summary.df %>% arrange(desc(pagerank_pctile)), file.path(analysis_dir, "network.lenient.summary.tsv"), na = "")
+  write_tsv(network2.summary.df %>% arrange(desc(pagerank_pctile)), file.path(analysis_dir, "network.l2g.summary.tsv"), na = "")
 }
 ```
 
@@ -112,7 +88,6 @@ if (saveFiles) {
 #length(unique(network1.df$gene_id))
 nrow(network1.summary.df)
 nrow(network2.summary.df)
-nrow(network3.summary.df)
 
 # idx = which(!network1.summary.df$gene_id %in% network2.summary.df$gene_id)
 # View(network1.summary.df[idx,])
@@ -136,8 +111,7 @@ We first consider the network scores based on the stringent set of 33 curated IB
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 #ggplot(network1.df, aes(x=pagerank_pctile)) + geom_histogram(bins = 100)
 ggplot(network1.summary.df, aes(x=pagerank_pctile)) + geom_histogram(bins = 100) + ggtitle("Pagerank pctile distribution (curated seed gene network)")
-ggplot(network2.summary.df, aes(x=pagerank_pctile)) + geom_histogram(bins = 100) + ggtitle("Pagerank pctile distribution (strict seed gene network)")
-ggplot(network3.summary.df, aes(x=pagerank_pctile)) + geom_histogram(bins = 100) + ggtitle("Pagerank pctile distribution (lenient seed gene network)")
+ggplot(network2.summary.df, aes(x=pagerank_pctile)) + geom_histogram(bins = 100) + ggtitle("Pagerank pctile distribution (L2G seed gene network)")
 ```
 
 Each of the network sets has a peak of occurrence at a particular (fairly low) pagerank percentile, which differs between the networks. There is also some depletion of very low pagerank percentiles for the stringent seed gene networks, but apart from that, the distribution of pagerank percentile is fairly uniform.
@@ -151,11 +125,7 @@ ggplot(network1.summary.df, aes(x=pagerank_pctile)) + stat_ecdf(geom = "step") +
 
 ggplot(network2.summary.df, aes(x=pagerank_pctile)) + stat_ecdf(geom = "step") +
   geom_abline(slope = 0.01, intercept = 0, col = "blue") +
-  ylab("Distribution quantile") + ggtitle("Pagerank pctile QQ plot (strict seed gene network)")
-
-ggplot(network3.summary.df, aes(x=pagerank_pctile)) + stat_ecdf(geom = "step") +
-  geom_abline(slope = 0.01, intercept = 0, col = "blue") +
-  ylab("Distribution quantile") + ggtitle("Pagerank pctile QQ plot (lenient seed gene network)")
+  ylab("Distribution quantile") + ggtitle("Pagerank pctile QQ plot (L2G seed gene network)")
 ```
 
 These are close enough to uniform (better than for AD) that we can use the Pagerank percentiles as-is. (Especially since we're not concerned about the very low range of Pagerank anyway.) So in general, a pagerank percentile of 80% means (to a close approximation) that the gene has a network score greater than 80% of genes.
@@ -166,17 +136,12 @@ These are close enough to uniform (better than for AD) that we can use the Pager
 ggplot(network1.summary.df, aes(x=degree, col=seed_gene, fill=seed_gene)) +
   geom_density(alpha = 0.3, size = 1) +
   scale_x_log10() +
-  ggtitle("Pagerank pctile by gene category (curated seed gene network)")
+  ggtitle("Gene degree by gene category (curated seed gene network)")
 
 ggplot(network2.summary.df, aes(x=degree, col=seed_gene, fill=seed_gene)) +
   geom_density(alpha = 0.3, size = 1) +
   scale_x_log10() +
-  ggtitle("Pagerank pctile by gene category (strict seed gene network)")
-
-ggplot(network3.summary.df, aes(x=degree, col=seed_gene, fill=seed_gene)) +
-  geom_density(alpha = 0.3, size = 1) +
-  scale_x_log10() +
-  ggtitle("Pagerank pctile by gene category (lenient seed gene network)")
+  ggtitle("Gene degree by gene category (L2G seed gene network)")
 ```
 
 Summary for seed genes (for the 3 networks):
@@ -184,7 +149,6 @@ Summary for seed genes (for the 3 networks):
 ```{r, warning=FALSE, message=FALSE}
 network1.summary.df %>% filter(seed_gene) %>% .$degree %>% summary()
 network2.summary.df %>% filter(seed_gene) %>% .$degree %>% summary()
-network3.summary.df %>% filter(seed_gene) %>% .$degree %>% summary()
 ```
 
 Summary for non-seed genes:
@@ -193,7 +157,7 @@ Summary for non-seed genes:
 network1.summary.df %>% filter(!seed_gene) %>% .$degree %>% summary()
 ```
 
-Our seed genes have a higher node degree on average than remaining genes. The lenient seed genes tend to have lower degree than the curated genes, but still higher than the average gene.
+Our seed genes have a higher node degree on average than remaining genes. The L2G-based seed genes tend to have lower degree than the curated genes, but still higher than the average gene.
 
 
 
@@ -290,12 +254,10 @@ network1.summary.df = network1.summary.df %>%
   mutate(locus_gene = gene_id %in% l2g.genes.df$gene_id,
          gene_type = if_else(geneSymbol %in% seed_genes_curated,
                              "curated gene",
-                             if_else(geneSymbol %in% seed_genes_strict,
-                                     "strict gene",
-                                     if_else(geneSymbol %in% seed_genes_lenient,
-                                             "lenient gene",
-                                             if_else(locus_gene, "locus gene", "other gene"))))) %>%
-  mutate(gene_type = factor(as.character(gene_type), levels = c("other gene", "locus gene", "lenient gene", "strict gene", "curated gene")))
+                             if_else(geneSymbol %in% seed_genes_l2g,
+                                     "L2G gene",
+                                     if_else(locus_gene, "locus gene", "other gene")))) %>%
+  mutate(gene_type = factor(as.character(gene_type), levels = c("other gene", "locus gene", "L2G gene", "curated gene")))
 
 
 p = ggplot(network1.summary.df, aes(x = gene_type, y = pagerank_pctile, fill = gene_type)) +
@@ -315,6 +277,7 @@ if (saveFiles) {
   dev.off()
 }
 summary(network1.summary.df %>% filter(seed_gene) %>% .$pagerank_pctile)
+#network1.summary.df %>% filter(gene_type == "curated gene") %>% nrow()
 
 wilcox.test(network1.summary.df %>% filter(seed_gene) %>% .$pagerank_pctile,
             network1.summary.df %>% filter(gene_type == "locus gene") %>% .$pagerank_pctile,
@@ -330,69 +293,47 @@ wilcox.test(network1.summary.df %>% filter(seed_gene) %>% .$pagerank_pctile,
 
 They are much higher on average, with a few outliers.
 
-Let's also look at this for the other 2 networks.
+Let's also look at this for the L2G network.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 network2.summary.df = network2.summary.df %>%
   mutate(locus_gene = gene_id %in% l2g.genes.df$gene_id,
          gene_type = if_else(geneSymbol %in% seed_genes_curated,
                              "curated gene",
-                             if_else(geneSymbol %in% seed_genes_strict,
-                                     "strict gene",
-                                     if_else(geneSymbol %in% seed_genes_lenient,
-                                             "lenient gene",
-                                             if_else(locus_gene, "locus gene", "other gene"))))) %>%
-  mutate(gene_type = factor(as.character(gene_type), levels = c("other gene", "locus gene", "lenient gene", "strict gene", "curated gene")))
+                             if_else(geneSymbol %in% seed_genes_l2g,
+                                     "L2G gene",
+                                     if_else(locus_gene, "locus gene", "other gene")))) %>%
+  mutate(gene_type = factor(as.character(gene_type), levels = c("other gene", "locus gene", "L2G gene", "curated gene")))
 
 ggplot(network2.summary.df, aes(x = gene_type, y = pagerank_pctile, fill = gene_type)) +
   geom_jitter(width = 0.1, alpha = 0.2) +
   geom_violin(alpha = 0.3) +
   geom_boxplot(outlier.shape = NA, width = 0.07, alpha = 0.8, fill="white") +
-  ggtitle("Pagerank pctile QQ plot (strict seed gene network)")
+  ggtitle("Pagerank pctile QQ plot (L2G seed gene network)")
 
 summary(network2.summary.df %>% filter(seed_gene) %>% .$pagerank_pctile)
+#network2.summary.df %>% filter(gene_type == "L2G gene") %>% nrow()
 
-wilcox.test(network2.summary.df %>% filter(gene_type == "strict gene") %>% .$pagerank_pctile,
+wilcox.test(network2.summary.df %>% filter(gene_type == "L2G gene") %>% .$pagerank_pctile,
             network2.summary.df %>% filter(gene_type == "locus gene") %>% .$pagerank_pctile,
             alternative = "greater")
 
 
 ```
 
-```{r, warning=FALSE, message=FALSE, echo=FALSE}
-network3.summary.df = network3.summary.df %>%
-  mutate(locus_gene = gene_id %in% l2g.genes.df$gene_id,
-         gene_type = if_else(geneSymbol %in% seed_genes_curated,
-                             "curated gene",
-                             if_else(geneSymbol %in% seed_genes_strict,
-                                     "strict gene",
-                                     if_else(geneSymbol %in% seed_genes_lenient,
-                                             "lenient gene",
-                                             if_else(locus_gene, "locus gene", "other gene"))))) %>%
-  mutate(gene_type = factor(as.character(gene_type), levels = c("other gene", "locus gene", "lenient gene", "strict gene", "curated gene")))
+In the network based on 110 L2G > 0.5 genes, the curated genes have slightly lower network scores than before, whereas the L2G genes are slightly higher. I'm not sure what this indicates - it could be interesting? Perhaps the curated genes are more biased towards specific coherent (known) pathways, and hence being selected as a curated gene means you are likely to be in those (high-network scoring) pathways... whereas L2G genes are less biased, as so do better on average in the less biased network?
 
-ggplot(network3.summary.df, aes(x = gene_type, y = pagerank_pctile, fill = gene_type)) +
-  geom_jitter(width = 0.1, alpha = 0.2) +
-  geom_violin(alpha = 0.3) +
-  geom_boxplot(outlier.shape = NA, width = 0.07, alpha = 0.8, fill="white") +
-  ggtitle("Pagerank pctile QQ plot (lenient seed gene network)")
-
-summary(network3.summary.df %>% filter(seed_gene) %>% .$pagerank_pctile)
-
-wilcox.test(network3.summary.df %>% filter(gene_type == "lenient gene") %>% .$pagerank_pctile,
-            network3.summary.df %>% filter(gene_type == "locus gene") %>% .$pagerank_pctile,
-            alternative = "greater")
-
-```
-
-It looks like the curated genes might have slightly higher network scores than those selected based on locus2gene score thresholds, but only very marginally. Interestingly, the curated genes also have slightly higher network scores specifically in the network of only curated seed genes, relative to the same curated genes in the network that includes all genes.
-
-Let's see the correlation between scores for the 3 networks.
+Let's see the correlation between scores for the 2 networks.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
-cor.test(network1.summary.df$pagerank_pctile, network2.summary.df$pagerank_pctile, method = "spearman")
-cor.test(network1.summary.df$pagerank_pctile, network3.summary.df$pagerank_pctile, method = "spearman")
-cor.test(network2.summary.df$pagerank_pctile, network3.summary.df$pagerank_pctile, method = "spearman")
+merged_network = network1.summary.df %>%
+  rename(curated_PRpctile = pagerank_pctile) %>%
+  left_join(network2.summary.df %>% rename(L2G_PRpctile = pagerank_pctile) %>% select(gene_id, L2G_PRpctile), by="gene_id") %>%
+  left_join(l2g.genes.df %>% select(gene_id, geneSymbol = symbol, l2g_score_mean), by="geneSymbol")
+
+ggplot(merged_network, aes(x=curated_PRpctile, y=L2G_PRpctile)) +
+  geom_point(alpha = 0.1)
+cor.test(merged_network$curated_PRpctile, merged_network$L2G_PRpctile, method = "spearman")
 ```
 
 
@@ -403,11 +344,11 @@ Let's look at the correlation (scatterplot) of locus2gene score and network scor
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 ggplot(l2g.net.uniq.df, aes(x=l2g_score_mean, y=pagerank_pctile)) +
   geom_point(alpha=0.4) +
-  geom_smooth()
+  geom_smooth() + ylab("Curated network PRpctile")
 
 ggplot(l2g.net.uniq.df, aes(y=l2g_score_mean, x=pagerank_pctile)) +
   geom_point(alpha=0.4) +
-  geom_smooth()
+  geom_smooth() + xlab("Curated network PRpctile")
 ```
 
 A violin plot might give a clearer view of what network score to expect for highly confident genes (based on high l2g score). This is similar to just looking at the curated, strict, or lenient gene sets as we did above.
@@ -416,14 +357,19 @@ A violin plot might give a clearer view of what network score to expect for high
 l2g.net.uniq.df$pagerank_pctile.cat = categorize(l2g.net.uniq.df$pagerank_pctile, thresholds = c(50, 60, 70, 80, 90, 95, 98))
 l2g.net.uniq.df$l2g_score_mean.cat = categorize(l2g.net.uniq.df$l2g_score_mean, thresholds = c(0.2, 0.4, 0.6, 0.8))
 ggplot(l2g.net.uniq.df, aes(x=l2g_score_mean.cat, y=pagerank_pctile)) +
-  geom_violin(alpha = 0.9) + geom_jitter(width = 0.25, alpha = 0.2) + geom_boxplot(width = 0.05, outlier.shape = NA, fill="white")
+  geom_violin(alpha = 0.9) +
+  geom_jitter(width = 0.25, alpha = 0.2) +
+  geom_boxplot(width = 0.05, outlier.shape = NA, fill="white") +
+  ylab("Curated network PRpctile")
 ```
 
 And similarly, but with axes reversed.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 ggplot(l2g.net.uniq.df, aes(x=pagerank_pctile.cat, y=l2g_score_mean)) +
-  geom_violin(alpha = 0.9) + geom_boxplot(width = 0.05, outlier.shape = NA, fill="white")
+  geom_violin(alpha = 0.9) +
+  geom_boxplot(width = 0.05, outlier.shape = NA, fill="white") +
+  xlab("Curated network PRpctile")
 ```
 
 
@@ -453,6 +399,7 @@ p = ggplot(l2g.seed_locus.df %>% filter(!seed_gene), aes(x=locus_name, y=pageran
   ylab("Pagerank percentile") + xlab("Seed gene") +
   scale_color_manual(name = "Seed gene", values = c("FALSE"="grey20", "TRUE"="blue")) +
   scale_size_manual(name = "Seed gene", values=c("TRUE"=2.5, "FALSE"=1.5))
+print(p)
 
 if (saveFiles) {
   pdf(file.path(analysis_dir, "pagerank_pct_per_locus.pdf"), width=8, height=4.2)
@@ -520,15 +467,20 @@ if (saveFiles) {
   }
   dev.off()
 }
-print( l2g_scatterplot(l2g.seed_locus.df, "ICAM1") )
-print( l2g_scatterplot(l2g.seed_locus.df, "LACC1") )
+print( l2g_scatterplot(l2g.seed_locus.df, "INAVA") )
+print( l2g_scatterplot(l2g.seed_locus.df, "LRRK2") )
+print( l2g_scatterplot(l2g.seed_locus.df, "BANK1") )
 
 ```
 
-```{r, warning=FALSE, message=FALSE, echo=FALSE}
+In most cases, for the loci where the curated gene has a low network score, it has a very high L2G, and no other genes do. This suggests to me that at these loci the network is missing something relevant.
+One outlier is BANK1, which has high network score and L2G score, whereas SLC39A8 is selected, and is relatively low for both scores.
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE, eval=FALSE}
 # Get genes in the lenient network which are in the same module as LACC1
-lacc1_module = network3.df %>% filter(Trait == "LACC1", gene_id == "ENSG00000179630") %>% .$cluster.walktrap
-lacc1_module_genes = network3.df %>% filter(Trait == "LACC1", cluster.walktrap == lacc1_module) %>% .$geneSymbol
+lacc1_module = network2.df %>% filter(Trait == "AL512506.3", gene_id == "ENSG00000179630") %>% .$cluster.walktrap
+lacc1_module_genes = network2.df %>% filter(Trait == "LACC1", cluster.walktrap == lacc1_module) %>% .$geneSymbol
 # Get the intersection of genes in this module with our lenient seed genes
 lacc1_module_seed_genes = lacc1_module_genes[lacc1_module_genes %in% seed_genes_lenient]
 network3.df %>% filter(Trait == "SOX4", geneSymbol == "SOX4")
@@ -540,8 +492,7 @@ network3.df %>% filter(Trait == "SATB1", geneSymbol == "SATB1")
 
 Notes:
 
-* For most of these loci the seed gene is still near the top. (E.g. ICAM1 and TYK2 are both at the top, along with TMED1, which is more distal and so not a great candidate despite a high network score.)
-* The LACC1 locus could be interesting, since CCDC122 gets strong support, whereas LACC1 does not at all. (How strong is the evidence from the missense variant in LACC1?)
+* For most of these loci the seed gene is still near the top.
 * SIRPG could be interesting at the FKBP1A locus (high L2G + network score)
 * Both MST1 and APEH could be interesting at the MST1 locus
 * For TNFSF8, I would put money on TNFSF15 being the gene, since it has a high L2G score (nearest gene), stronger coloc evidence (in the genetics portal at least), and higher network score.
@@ -566,14 +517,14 @@ ggplot(l2g.genes.net.df %>% filter(gene_type == "locus gene"), aes(x=l2g_locus_m
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   ggtitle("PageRank percentile per locus") +
   ylab("Pagerank percentile") + xlab("Locus") +
-  scale_color_manual(name = "Gene group", values = c("locus gene"="grey20", "curated gene"="blue", "strict gene"="red", "lenient gene"="green4")) +
-  scale_size_manual(name = "Gene group", values=c("locus gene"=1.5, "curated gene"=2.5, "strict gene"=2.5, "lenient gene"=2.5))
+  scale_color_manual(name = "Gene group", values = c("locus gene"="grey20", "curated gene"="blue", "L2G gene"="red")) +
+  scale_size_manual(name = "Gene group", values=c("locus gene"=1.5, "curated gene"=2.5, "L2G gene"=2.5))
 
 ```
 
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.width=6, fig.height=4}
-# Let's also save some l2g scatterplots for all loci based on the strict and lenient seed gene networks
+# Let's also save some l2g scatterplots for all loci based on the L2G >0.5 seed gene networks
 network2_seedgenes = network2.summary.df %>% filter(seed_gene) %>% .$gene_id %>% unique()
 network2_seedgene_loci = l2g.genes.df %>% filter(gene_id %in% network2_seedgenes) %>% .$l2g_locus_merged %>% unique()
 l2g.locus.df = l2g.genes.df %>% filter(l2g_locus_merged %in% network2_seedgene_loci)
@@ -588,34 +539,7 @@ l2g.locus.df = l2g.locus.df %>%
 
 if (saveFiles) {
   locus_names = unique(l2g.locus.df$locus_name)
-  pdf(file = file.path(analysis_dir, "strict_network.locus_scatterplots.pdf"), width=7, height=5)
-  for (cur_locus in locus_names) {
-    print( l2g_scatterplot(l2g.locus.df, cur_locus) )
-  }
-  dev.off()
-}
-#print( l2g_scatterplot(l2g.locus.df, "ICAM1") )
-#print( l2g_scatterplot(l2g.locus.df, "LACC1") )
-
-```
-
-```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.width=8, fig.height=6}
-# Let's also save some l2g scatterplots for all loci based on the strict and lenient seed gene networks
-network3_seedgenes = network3.summary.df %>% filter(seed_gene) %>% .$gene_id %>% unique()
-network3_seedgene_loci = l2g.genes.df %>% filter(gene_id %in% network3_seedgenes) %>% .$l2g_locus_merged %>% unique()
-l2g.locus.df = l2g.genes.df %>% filter(l2g_locus_merged %in% network3_seedgene_loci)
-#ViewDups(l2g.seed_locus.df, 6)
-l2g.locus.df = l2g.locus.df %>%
-  left_join(network3.summary.df, by = "gene_id") %>%
-  group_by(l2g_locus_merged) %>%
-  arrange(desc(seed_gene), desc(l2g_score_mean)) %>%
-  mutate(locus_name = first(geneSymbol),
-         has_seed_gene = any(seed_gene)) %>%
-  select(l2g_locus_merged, seed_gene, geneSymbol, locus_name, everything()) %>% na.omit()
-
-if (saveFiles) {
-  locus_names = unique(l2g.locus.df$locus_name)
-  pdf(file = file.path(analysis_dir, "lenient_network.locus_scatterplots.pdf"), width=7, height=5)
+  pdf(file = file.path(analysis_dir, "l2g_network.locus_scatterplots.pdf"), width=7, height=5)
   for (cur_locus in locus_names) {
     print( l2g_scatterplot(l2g.locus.df, cur_locus) )
   }
@@ -632,32 +556,29 @@ if (saveFiles) {
 # one for each of the networks
 if (saveFiles) {
   l2g.network.df = l2g.genes.df %>%
-    left_join(network3.summary.df %>% select(gene_id, seed_gene3 = seed_gene, prpct3 = pagerank_pctile, geneSymbol), by = "gene_id") %>%
-    left_join(network2.summary.df %>% select(gene_id, seed_gene2 = seed_gene, prpct2 = pagerank_pctile), by = "gene_id") %>%
+    left_join(network2.summary.df %>% select(gene_id, seed_gene2 = seed_gene, prpct2 = pagerank_pctile, geneSymbol), by = "gene_id") %>%
     left_join(network1.summary.df %>% select(gene_id, seed_gene1 = seed_gene, prpct1 = pagerank_pctile), by = "gene_id") %>%
     group_by(l2g_locus_merged) %>%
-    arrange(desc(seed_gene3), desc(l2g_score_mean)) %>%
+    arrange(desc(seed_gene2), desc(l2g_score_mean)) %>%
     mutate(locus_name = first(geneSymbol),
-           has_seed_gene = any(seed_gene3)) %>%
-    select(l2g_locus_merged, locus_name, gene_id, geneSymbol, seed_gene3, seed_gene2, seed_gene1, starts_with("l2g"), everything()) %>%
-    filter(!is.na(prpct3))
+           has_seed_gene = any(seed_gene2 | seed_gene1)) %>%
+    select(l2g_locus_merged, locus_name, gene_id, geneSymbol, seed_gene2, seed_gene1, starts_with("l2g"), everything()) %>%
+    filter(!is.na(prpct2))
   
   locus_names = unique(l2g.network.df$locus_name)
   l2g.network1.df = l2g.genes.df %>%
     left_join(network1.summary.df %>% select(gene_id, geneSymbol, seed_gene, pagerank_pctile), by = "gene_id") %>% mutate(network="curated")
   l2g.network2.df = l2g.genes.df %>%
-    left_join(network2.summary.df %>% select(gene_id, geneSymbol, seed_gene, pagerank_pctile), by = "gene_id") %>% mutate(network="strict")
-  l2g.network3.df = l2g.genes.df %>%
-    left_join(network3.summary.df %>% select(gene_id, geneSymbol, seed_gene, pagerank_pctile), by = "gene_id") %>% mutate(network="lenient")
-  l2g.network.df = bind_rows(l2g.network1.df, l2g.network2.df, l2g.network3.df) %>%
-    group_by(network, l2g_locus_merged) %>%
+    left_join(network2.summary.df %>% select(gene_id, geneSymbol, seed_gene, pagerank_pctile), by = "gene_id") %>% mutate(network="l2g")
+  l2g.network.df = bind_rows(l2g.network1.df, l2g.network2.df) %>%
+    group_by(l2g_locus_merged) %>%
     arrange(desc(seed_gene), desc(l2g_score_mean)) %>%
     mutate(locus_name = first(geneSymbol)) %>%
     ungroup() %>%
-    mutate(network = factor(as.character(network), levels=c("curated", "strict", "lenient")))
+    mutate(network = factor(as.character(network), levels=c("curated", "l2g")))
   locus_names = unique(l2g.network.df$locus_name)
 
-  pdf(file = file.path(analysis_dir, "locus_scatterplots.3networks.pdf"), width=10, height=4)
+  pdf(file = file.path(analysis_dir, "locus_scatterplots.2networks.pdf"), width=10, height=4)
   for (cur_locus in locus_names) {
     p = l2g_scatterplot(l2g.network.df, cur_locus) + facet_wrap(~network, nrow = 1) + theme_bw(10)
     print(p)
@@ -701,10 +622,10 @@ vecQuantiles = function(x) {
   sapply(x, function(val) if (is.na(val)) { NA } else { (sum(x <= val, na.rm = T) - 1) / (sum(!is.na(x)) - 1) })
 }
 
-gene_minp_file = file.path(analysis_dir, "genes.pc.10kb_window.katie_ibd.minp.tsv.gz")
+gene_minp_file = file.path(root_dir, "genes.pc.10kb_window.katie_ibd.minp.tsv.gz")
 
 if (!file.exists(gene_minp_file)) {
-  genes.minp.df = readr::read_tsv(file.path(analysis_dir, "genes.pc.10kb_window.katie_ibd.snp_overlaps.tsv.gz")) %>%
+  genes.minp.df = readr::read_tsv(file.path(root_dir, "genes.pc.10kb_window.katie_ibd.snp_overlaps.tsv.gz")) %>%
     filter(pvalue != -1) %>%
     na.omit() %>%
     group_by(gene_id) %>%
@@ -735,10 +656,10 @@ ggplot(network1.minp.df %>% filter(minp > 1e-8), aes(x=-log10(minp))) +
 Do similarly for Jimmy's IBD GWAS.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.width=6, fig.height=4}
-jimmy_gene_minp_file = file.path(analysis_dir, "genes.pc.10kb_window.jimmy_ibd.minp.tsv.gz")
+jimmy_gene_minp_file = file.path(root_dir, "genes.pc.10kb_window.jimmy_ibd.minp.tsv.gz")
 
 if (!file.exists(jimmy_gene_minp_file)) {
-  genes.jimmy.minp.df = readr::read_tsv(file.path(analysis_dir, "genes.pc.10kb_window.jimmy_ibd.snp_overlaps.tsv.gz")) %>%
+  genes.jimmy.minp.df = readr::read_tsv(file.path(root_dir, "genes.pc.10kb_window.jimmy_ibd.snp_overlaps.tsv.gz")) %>%
     filter(pvalue != -1) %>%
     na.omit() %>%
     group_by(gene_id) %>%
@@ -790,10 +711,16 @@ network1.minp.df$pagerank_pctile.cat = factor(network1.minp.df$pagerank_pctile.c
 #xtabs(~ minp_cat + pagerank_pctile.cat, data = network1.minp.df)
 or.df = stratifiedOddsRatios(network1.minp.df, "minp_cat", "pagerank_pctile.cat")
 or.df$cat1 = factor(or.df$cat1, levels = minp_cat_levels)
+#or.df$cat1[or.df$cat1 == "1e-06-1e-04"] = parse(text="10^-6 - 10^-4")
 or.df$cat2 = factor(or.df$cat2, levels = pagerank_pct_cat_levels)
+
+minp_cat_display_levels = c("> 0.01", parse(text="10^-2 - 10^-4"), parse(text="10^-4 - 10^-6"), parse(text="10^-6 - 10^-8"), paste("< ", parse(text="10^-8")))
+
 p = stratifiedOddsRatioPlot(or.df, "Minimum p value (Katie IBD GWAS)", "Pagerank\npercentile") +
   ggtitle("Curated seed gene network - Katie's GWAS minp") +
-  theme_bw(12)
+  theme_bw(12) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1), axis.title.x = element_blank()) +
+  scale_x_discrete(breaks = minp_cat_levels, labels = minp_cat_display_levels)
 print(p)
 
 if (saveFiles) {
@@ -842,30 +769,7 @@ network2.minp.df$pagerank_pctile.cat = factor(network2.minp.df$pagerank_pctile.c
 or.df = stratifiedOddsRatios(network2.minp.df, "minp_cat", "pagerank_pctile.cat")
 or.df$cat1 = factor(or.df$cat1, levels = minp_cat_levels)
 or.df$cat2 = factor(or.df$cat2, levels = pagerank_pct_cat_levels)
-stratifiedOddsRatioPlot(or.df, "Minimum p value", "Pagerank\npercentile") + ggtitle("Strict seed gene network - Katie's GWAS minp")
-
-```
-
-
-```{r, warning=FALSE, message=FALSE, echo=FALSE}
-network3.minp.df = network3.summary.df %>%
-  inner_join(genes.minp.df, by="gene_id")
-
-network3.minp.df$minp_cat = categorize(network3.minp.df$minp, thresholds = c(0.01, 1e-4, 1e-6, 1e-8))
-minp_cat_levels = c("> 0.01", "1e-04-0.01", "1e-06-1e-04", "1e-08-1e-06", "<= 1e-08")
-network3.minp.df$minp_cat = factor(network3.minp.df$minp_cat, levels = minp_cat_levels)
-
-network3.minp.df$pagerank_pctile.cat = categorize(network3.minp.df$pagerank_pctile, thresholds = c(50, 60, 70, 80, 90))
-pagerank_pct_cat_levels = c("<= 50", "50-60", "60-70", "70-80", "80-90", "> 90")
-network3.minp.df$pagerank_pctile.cat = categorize(network3.minp.df$pagerank_pctile, thresholds = c(50, 60, 70, 80, 90, 95, 98))
-pagerank_pct_cat_levels = c("<= 50", "50-60", "60-70", "70-80", "80-90", "90-95", "95-98", "> 98")
-network3.minp.df$pagerank_pctile.cat = factor(network3.minp.df$pagerank_pctile.cat, levels = pagerank_pct_cat_levels)
-#xtabs(~ minp_cat + pagerank_pctile.cat, data = network3.minp.df)
-or.df = stratifiedOddsRatios(network3.minp.df, "minp_cat", "pagerank_pctile.cat")
-or.df$cat1 = factor(or.df$cat1, levels = minp_cat_levels)
-#or.df$cat2 = factor(or.df$cat2, levels = c("<= 50", "50-60", "60-70", "70-80", "80-90", "> 90"))
-or.df$cat2 = factor(or.df$cat2, levels = c("<= 50", "50-60", "60-70", "70-80", "80-90", "90-95", "95-98", "> 98"))
-stratifiedOddsRatioPlot(or.df, "Minimum p value", "Pagerank\npercentile") + ggtitle("Lenient seed gene network - Katie's GWAS minp")
+stratifiedOddsRatioPlot(or.df, "Minimum p value", "Pagerank\npercentile") + ggtitle("L2G seed gene network - Katie's GWAS minp")
 
 ```
 
@@ -876,10 +780,10 @@ stratifiedOddsRatioPlot(or.df, "Minimum p value", "Pagerank\npercentile") + ggti
 We can do the same odds ratio analyses considering only variants that overlap genes, without a 10 kb window. This avoids the problem that +/-10 kb will include the same SNPs multiple times in gene-dense regions.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE, fig.width=6, fig.height=4}
-gene_minp_file = file.path(analysis_dir, "genes.pc.overlapping.katie_ibd.minp.tsv.gz")
+gene_minp_file = file.path(root_dir, "genes.pc.overlapping.katie_ibd.minp.tsv.gz")
 
 if (!file.exists(gene_minp_file)) {
-  gene_pvalues_file = file.path(analysis_dir, "genes.pc.katie_ibd.snp_overlaps.tsv.gz")
+  gene_pvalues_file = file.path(root_dir, "genes.pc.katie_ibd.snp_overlaps.tsv.gz")
   genes.minp.df = readr::read_tsv(gene_pvalues_file) %>%
     filter(pvalue != -1) %>%
     na.omit() %>%
@@ -956,34 +860,12 @@ stratifiedOddsRatioPlot(or.df, "Minimum p value", "Pagerank\npercentile") + ggti
 ```
 
 
-```{r, warning=FALSE, message=FALSE, echo=FALSE}
-network3.minp.df = network3.summary.df %>%
-  inner_join(genes.minp.df, by="gene_id")
-
-network3.minp.df$minp_cat = categorize(network3.minp.df$minp, thresholds = c(0.01, 1e-4, 1e-6, 1e-8))
-minp_cat_levels = c("> 0.01", "1e-04-0.01", "1e-06-1e-04", "1e-08-1e-06", "<= 1e-08")
-network3.minp.df$minp_cat = factor(network3.minp.df$minp_cat, levels = minp_cat_levels)
-
-network3.minp.df$pagerank_pctile.cat = categorize(network3.minp.df$pagerank_pctile, thresholds = c(50, 60, 70, 80, 90))
-pagerank_pct_cat_levels = c("<= 50", "50-60", "60-70", "70-80", "80-90", "> 90")
-network3.minp.df$pagerank_pctile.cat = categorize(network3.minp.df$pagerank_pctile, thresholds = c(50, 60, 70, 80, 90, 95, 98))
-pagerank_pct_cat_levels = c("<= 50", "50-60", "60-70", "70-80", "80-90", "90-95", "95-98", "> 98")
-network3.minp.df$pagerank_pctile.cat = factor(network3.minp.df$pagerank_pctile.cat, levels = pagerank_pct_cat_levels)
-#xtabs(~ minp_cat + pagerank_pctile.cat, data = network3.minp.df)
-or.df = stratifiedOddsRatios(network3.minp.df, "minp_cat", "pagerank_pctile.cat")
-or.df$cat1 = factor(or.df$cat1, levels = minp_cat_levels)
-#or.df$cat2 = factor(or.df$cat2, levels = c("<= 50", "50-60", "60-70", "70-80", "80-90", "> 90"))
-or.df$cat2 = factor(or.df$cat2, levels = c("<= 50", "50-60", "60-70", "70-80", "80-90", "90-95", "95-98", "> 98"))
-stratifiedOddsRatioPlot(or.df, "Minimum p value", "Pagerank\npercentile") + ggtitle("Lenient seed gene network")
-
-```
-
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 # PRIORITIZING GENES
 # Here we write out a table with genes prioritised both by L2G and network
 # First we need to find all genes within a window at each locus
-windowSize = 2e5
+windowSize = 5e5
 l2g.loci.df2 = l2g.loci.df %>%
   dplyr::select(chr, l2g_mean_pos, l2g_locus_merged) %>%
   mutate(l2g_start = l2g_mean_pos - windowSize, l2g_end = l2g_mean_pos + windowSize)
@@ -1005,8 +887,7 @@ locus_genes.df = bind_cols(l2g.loci.df[hits.df$queryHits,] %>%
                            grch38.df[hits.df$subjectHits,] %>% dplyr::select(-chr) %>% dplyr::rename(gene_id = ensgene)) %>%
   left_join(l2g.genes.df %>% select(l2g_locus_merged, gene_id, l2g_score_mean), by=c("gene_id", "l2g_locus_merged")) %>%
   left_join(network1.summary.df %>% select(gene_id, geneSymbol, network1_pagerank_pctile = pagerank_pctile, network1_seed_gene = seed_gene)) %>%
-  left_join(network2.summary.df %>% select(gene_id, network2_pagerank_pctile = pagerank_pctile, network2_seed_gene = seed_gene)) %>%
-  left_join(network3.summary.df %>% select(gene_id, network3_pagerank_pctile = pagerank_pctile, network3_seed_gene = seed_gene))
+  left_join(network2.summary.df %>% select(gene_id, network2_pagerank_pctile = pagerank_pctile, network2_seed_gene = seed_gene))
 
 # Create a network score that rewards being above the 50th pctile and is the
 # average across the 3 networks
@@ -1014,11 +895,11 @@ locus_genes.df = bind_cols(l2g.loci.df[hits.df$queryHits,] %>%
 locus_genes.df = locus_genes.df %>%
   group_by(l2g_locus_merged) %>%
   mutate(network1_rank = rank(-network1_pagerank_pctile, ties.method = "average"),
-         network2_rank = rank(-network2_pagerank_pctile, ties.method = "average"),
-         network3_rank = rank(-network3_pagerank_pctile, ties.method = "average")) %>%
+         network2_rank = rank(-network2_pagerank_pctile, ties.method = "average")) %>%
   rowwise() %>%
-  mutate(network_avg = mean(c(network1_pagerank_pctile, network2_pagerank_pctile, network3_pagerank_pctile)),
-         network_score = max(0, (network_avg - 50) * 2),
+  mutate(network_avg = mean(c(network1_pagerank_pctile, network2_pagerank_pctile)),
+         network_max = max(c(network1_pagerank_pctile, network2_pagerank_pctile)),
+         network_score = max(0, (network_max - 50) * 2),
          l2g_network_score = sqrt(l2g_score_mean) * network_score) %>%
   group_by(l2g_locus_merged) %>%
   mutate(l2g_network_score_rank = rank(-l2g_network_score, ties.method = "average")) %>%
@@ -1039,23 +920,33 @@ locus_top_l2gene_network_score = locus_genes.df %>%
   filter(row_number() == 1) %>%
   select(l2g_locus_merged, top_gene_network_score = network_score, locus_has_curated_gene) %>%
   mutate(top_gene_network_score = if_else(is.na(top_gene_network_score), 0, top_gene_network_score))
-locus_second_best_candidate = locus_genes.df %>%
+locus_second_best_network_candidate = locus_genes.df %>%
   filter(network_avg > 80, l2g_score_mean > 0.1) %>%
   group_by(l2g_locus_merged) %>%
   arrange(desc(network_score)) %>%
   filter(row_number() == 2) %>%
   select(l2g_locus_merged, second_best_network_score = network_score)
+locus_second_best_l2g_net_candidate = locus_genes.df %>%
+  group_by(l2g_locus_merged) %>%
+  arrange(desc(l2g_network_score)) %>%
+  filter(row_number() == 2) %>%
+  select(l2g_locus_merged, second_best_l2g_network_score = l2g_network_score)
 locus_genes.df2 = locus_genes.df %>%
   group_by(gene_id) %>%
   left_join(locus_top_l2gene_network_score, by="l2g_locus_merged") %>%
-  left_join(locus_second_best_candidate, by="l2g_locus_merged") %>%
+  left_join(locus_second_best_network_candidate, by="l2g_locus_merged") %>%
+  left_join(locus_second_best_l2g_net_candidate, by="l2g_locus_merged") %>%
   mutate(second_best_network_score = if_else(is.na(second_best_network_score), 0, second_best_network_score)) %>%
-  mutate(network_revised_candidate = (!locus_has_curated_gene & network_score > top_gene_network_score & network_score > 60 & top_gene_network_score < 60 & l2g_score_mean > 0.1),
-         network_top_new_candidate = (!locus_has_curated_gene & network_score > 80 & l2g_score_mean > 0.1 & l2g_network_score_rank == 1 & second_best_network_score < 60)) %>%
+  mutate(network_revised_candidate = (!locus_has_curated_gene & network_score > top_gene_network_score & network_score > 60 & top_gene_network_score < 60 & l2g_score_mean > 0.1 & l2g_network_score_rank == 1),
+         network_top_new_candidate = (!locus_has_curated_gene & network_score > 90 & l2g_score_mean > 0.1 & l2g_network_score_rank == 1 & second_best_network_score < 60),
+         network_l2g_top_new_candidate = (!locus_has_curated_gene & l2g_network_score_rank == 1 & (l2g_network_score - second_best_l2g_network_score) > 20)) %>%
   left_join(grch38.nodup %>% select(ensgene, description), by=c("gene_id" = "ensgene")) %>%
-  arrange(chr, l2g_mean_pos, l2g_locus_merged, desc(l2g_score_mean))
+  arrange(chr, l2g_mean_pos, l2g_locus_merged, desc(l2g_score_mean)) %>%
+  select(l2g_locus_merged:gene_id, network_top_new_candidate, network_l2g_top_new_candidate, symbol, l2g_network_score, l2g_score_mean, network1_pagerank_pctile, network2_pagerank_pctile, network1_seed_gene, network2_seed_gene, second_best_l2g_network_score, second_best_network_score, l2g_network_score_rank, everything())
 #sum(locus_genes.df2$network_revised_candidate, na.rm=T)
+sum(locus_genes.df2$network_revised_candidate, na.rm=T)
 sum(locus_genes.df2$network_top_new_candidate, na.rm=T)
+sum(locus_genes.df2$network_l2g_top_new_candidate, na.rm=T)
 write_tsv(locus_genes.df2, file.path(analysis_dir, "locus_genes.network.revised_candidates.tsv"), na = "")
 ```
 
